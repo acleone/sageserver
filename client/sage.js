@@ -1,0 +1,5 @@
+var Sage = {
+    importjs: function () {
+
+    }
+};

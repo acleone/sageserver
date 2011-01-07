@@ -1,0 +1,35 @@
+Note: I'm working on the computation node at the moment.  Nothing else is
+really done.
+
+See https://docs.google.com/document/d/1uYJXPAWypGgb92QStJ19cW-29y4-hn5hi8oXMR-11TU/edit?hl=en&authkey=CISp9cQB
+for a general outline of the server.
+
+Setup
+=====
+
+1. Install twisted
+
+2. Download and install mongodb-linux-...-1.6.5.tgz
+
+3. Get the python drivers (and bson module)::
+    
+    $ easy_install -U pymongo
+
+4. (for building documentation) Install sphinx (1.0.6)::
+
+    $ sudo easy_install -U sphinx
+
+
+Running
+=======
+
+Note: the client doesn't talk to the server yet.
+
+::
+
+  $ python run_compnode.py
+  
+And open client/simple_exec.html in a webbrowser (File->Open)
+
+
+
