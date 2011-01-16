@@ -6,6 +6,189 @@
 
 from bson import SON, _dict_to_bson
 
-from hdr import Hdr
+from hdr import Hdr, HDRF_SCLOSE
 
+class Stdin(SON):
+    """
+    Stdin Message
+    
+    Message Arguments:
+        bytes -- None
+    """
+    type = 0
+    
+    def __init__(self, bytes, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(0, _hsid, 0, _hflags)
+        self.type = 0
+        self['t'] = 0
+        self['bytes'] = bytes
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
 
+class Stdout(SON):
+    """
+    Stdout Message
+    
+    Message Arguments:
+        bytes -- None
+    """
+    type = 1
+    
+    def __init__(self, bytes, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(1, _hsid, 0, _hflags)
+        self.type = 1
+        self['t'] = 1
+        self['bytes'] = bytes
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Stderr(SON):
+    """
+    Stderr Message
+    
+    Message Arguments:
+        bytes -- None
+    """
+    type = 2
+    
+    def __init__(self, bytes, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(2, _hsid, 0, _hflags)
+        self.type = 2
+        self['t'] = 2
+        self['bytes'] = bytes
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Except(SON):
+    """
+    Except Message
+    
+    Message Arguments:
+        stderr -- None
+        stack -- None (default: None)
+        etype -- None (default: None)
+        value -- None (default: None)
+        syntax -- None (default: None)
+    """
+    type = 10
+    
+    def __init__(self, stderr, stack=None, etype=None, value=None, syntax=None, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(10, _hsid, 0, _hflags)
+        self.type = 10
+        self['t'] = 10
+        self['stderr'] = stderr
+        self['stack'] = stack
+        self['etype'] = etype
+        self['value'] = value
+        self['syntax'] = syntax
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class NeedStdin(SON):
+    """
+    NeedStdin Message
+    
+    Message Arguments:
+        nbytes -- None
+    """
+    type = 90
+    
+    def __init__(self, nbytes, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(90, _hsid, 0, _hflags)
+        self.type = 90
+        self['t'] = 90
+        self['nbytes'] = nbytes
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Done(SON):
+    """
+    Done Message
+    """
+    type = 99
+    
+    def __init__(self, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(99, _hsid, 0, _hflags)
+        self.type = 99
+        self['t'] = 99
+        
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        

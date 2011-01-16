@@ -36,32 +36,11 @@ def transform_source(exec_msg, globals_):
     :param exec_msg: a :class:`msg.Exec` instance.
     :returns: a string to be parsed into an ast.
     """
-    source = exec_msg.end_bytes
+    source = exec_msg['source']
     source = parse_percent_directives(exec_msg, source, globals_)
     return source
-    
-    
-def transform_ast(exec_msg, source_ast, source_lines, globals_):
-    """
-    Called after the code is parsed into an AST.
-    
-    :param exec_msg: a :class:`msg.Exec` instance.
-    :param source_ast: the ast of the source
-    :param source_lines: ``source.splitlines()``
-    :returns: the transformed ast.
-    """
-    dh = exec_msg.dict.get('displayhook', 'last')
-    if dh == 'last':
-        source_ast = displayhook_last(source_ast)
-    elif dh == 'all':
-        source_ast = DisplayhookAll().visit(source_ast)
-    ah = exec_msg.dict.get('assignhook', None)
-    if ah == 'all':
-        source_ast = AssignhookAll(source_lines).visit(source_ast)
-    if exec_msg.dict.get('print_ast', False):
-        print astpp.dump(source_ast)
-    return source_ast
-    
+
+
 def parse_percent_directives(exec_msg, source, globals_):
     """
     Parses percent directives and changes exec_msg.opts.
@@ -72,12 +51,35 @@ def parse_percent_directives(exec_msg, source, globals_):
         if not line.startswith('%'):
             break
             
-        d, s, v = line[1:].partition('=')
+        d, _, v = line[1:].partition('=')
         d = d.strip()
         v = v.strip()
-        exec_msg.dict[d] = eval(v, globals_)
+        exec_msg[d] = eval(v, globals_)
         lines[i] = '#' + line
     return ''.join(lines)
+
+
+def transform_ast(exec_msg, source_ast, source_lines, globals_):
+    """
+    Called after the code is parsed into an AST.
+    
+    :param exec_msg: a :class:`msg.Exec` instance.
+    :param source_ast: the ast of the source
+    :param source_lines: ``source.splitlines()``
+    :returns: the transformed ast.
+    """
+    dh = exec_msg['displayhook']
+    if dh == 'LAST':
+        source_ast = displayhook_last(source_ast)
+    elif dh == 'ALL':
+        source_ast = DisplayhookAll().visit(source_ast)
+    ah = exec_msg['assignhook']
+    if ah == 'ALL':
+        source_ast = AssignhookAll(source_lines).visit(source_ast)
+    if exec_msg['print_ast']:
+        print astpp.dump(source_ast)
+    return source_ast
+
     
 def displayhook_expr(node):
     """

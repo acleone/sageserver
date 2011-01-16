@@ -1,6 +1,7 @@
 from io import IOBase
 
 import sageserver.msg as msg
+from sageserver.util import JoinBuffer
 
 class QueueFileOut(IOBase):
     r"""
@@ -21,10 +22,8 @@ class QueueFileOut(IOBase):
         >>> m2
         Stdout('\n', id=1)
     """
-    
-    __slots__ = ('_send_q', '_msg_cls', '_id', '_buf')
-    
-    def __init__(self, send_q, msg_cls, id):
+        
+    def __init__(self, send_q, msg_cls, sid):
         """
         :param send_q: a :class:`Queue.Queue` object to put Msgs onto.
         :param msg_cls: a subclass of :class:`msg.MsgWithId`, usually
@@ -34,14 +33,8 @@ class QueueFileOut(IOBase):
             :class:`msg.MsgWithId` or id is less than zero.
         """
         self._send_q = send_q
-        if not issubclass(msg_cls, msg.MsgWithId):
-            raise ValueError('msg_cls(%r) must be a subclass of msg.MsgWithId!'
-                             % (msg_cls,))
         self._msg_cls = msg_cls
-        if id < 0:
-            raise ValueError('id(%r) must not be less than zero!' % (id,))
-        self._id = id
-        self._buf = b''
+        self._sid = sid
         
     @property
     def encoding(self):
@@ -56,14 +49,13 @@ class QueueFileOut(IOBase):
         
     @property
     def name(self):
-        return '<QueueFileOut:%s(id=%s)>' % (self._msg_cls.__name__,
-                                             self._id)
+        return '<QueueFileOut:%s(sid=%s)>' % (self._msg_cls.__name__,
+                                              self._sid)
     
     def write(self, s):
         if not isinstance(s, basestring):
             s = str(s)
-        self._buf += s
-        self._send_q.put(self._msg_cls(id=self._id, end_bytes=s))
+        self._send_q.put(self._msg_cls(s, _hsid=self._sid))
         
     def writelines(self, iterable):
         out = []
@@ -97,10 +89,7 @@ class QueueFileIn(IOBase):
         Stdin(id=2)
     """
     
-    __slots__ = ('_recv_q', '_send_q', '_id', '_inline_stdin', '_buf',
-                 '_waiting')
-    
-    def __init__(self, recv_q, send_q, id, inline_stdin=True):
+    def __init__(self, recv_q, send_q, sid, echo_stdin=True):
         """
         :param recv_q: a :class:`Queue.Queue` object to get Msg objects
             from. If the received Msg object is not an instance of
@@ -118,9 +107,9 @@ class QueueFileIn(IOBase):
         """
         self._recv_q = recv_q
         self._send_q = send_q
-        self._id = id
-        self._inline_stdin = inline_stdin
-        self._buf = b''
+        self._sid = sid
+        self._echo_stdin = echo_stdin
+        self._jbuf = JoinBuffer()
         self._waiting = False
 
     @property
@@ -136,7 +125,7 @@ class QueueFileIn(IOBase):
         
     @property
     def name(self):
-        return '<QueueFileIn(id=%s)>' % (self._id,)
+        return '<QueueFileIn(sid=%s)>' % (self._sid,)
         
     @property
     def waiting(self):
@@ -153,56 +142,54 @@ class QueueFileIn(IOBase):
         :raises: KeyboardInterrupt if we received a :class:`msg.Interrupt`.
         """
         if self._recv_q.empty():
-            self._send_q.put(msg.NeedStdin(id=self._id, end_bytes=str(size)) )
+            self._send_q.put(msg.NeedStdin(size, _hsid=self._sid))
         m = self._recv_q.get()
         if m.type == msg.INTERRUPT:
             raise KeyboardInterrupt
         if not m.type == msg.STDIN:
             return ''
-        return m.end_bytes
+        return m.bytes
         
     def _send_stdin(self, bytes, wasEOF=True):
         """
         Sends msg.Stdin to send_queue if not None.  Adds empty Stdin() if
         wasEOF is true.
         """
-        if self._inline_stdin:
-            self._send_q.put(msg.Stdin(end_bytes=bytes, id=self._id))
+        if self._echo_stdin:
+            self._send_q.put(msg.Stdin(bytes, _hsid=self._sid))
             if wasEOF:
-                self._send_q.put(msg.Stdin(id=self._id))
+                self._send_q.put(msg.Stdin('', _hsid=self._sid))
     
     def read(self, size=-1):
         if size == 0:
             return b''
+        jbuf = self._jbuf
         self._waiting = True
         if size < 0:
-            b = [self._buf]
-            self._buf = b''
             while True:
-                bytes = self._recv_stdin(-1)
-                if not bytes:
+                rbytes = self._recv_stdin(-1)
+                if not rbytes:
                     break
-                b.append(bytes)
-            r = b''.join(b)
+                jbuf.extend(rbytes)
+            r = jbuf.popall()
             self._send_stdin(r, True)
             self._waiting = False
             return r
         # size > 0:
-        rlen = size - len(self._buf)
         wasEOF = False
-        while rlen > 0:
-            bytes = self._recv_stdin(rlen)
-            if not bytes:
+        while len(jbuf) < size:
+            rbytes = self._recv_stdin(size - len(jbuf))
+            if not rbytes:
                 wasEOF = True
                 break
-            self._buf += bytes
-            rlen = size - len(self._buf)
-        r = self._buf[:size]
-        self._buf = self._buf[size:]
+            jbuf.extend(rbytes)
+        if wasEOF:
+            r = jbuf.popall()
+        else:
+            r = jbuf.popleft(size)
         self._send_stdin(r, wasEOF)
         self._waiting = False
-        return r
-            
+        return r            
 
 if __name__ == '__main__':
     import doctest

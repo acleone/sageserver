@@ -1,6 +1,6 @@
 from bson import _bson_to_dict, _dict_to_bson, SON
 
-from hdr import Hdr, HDR_LEN
+from hdr import Hdr, HDR_LEN, HDRF_SCLOSE
 from sageserver.util import JoinBuffer
 
 class DecodedMsg(object):
@@ -19,6 +19,11 @@ class DecodedMsg(object):
         self._bodybytes = _bodybytes
         self.type = _hdr.type
         self._body = None
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def __getitem__(self, key):
         self.ensure_decoded()
@@ -39,7 +44,7 @@ class DecodedMsg(object):
         """
         Returns a body object.
         """
-        return _bson_to_dict(bodybytes, SON, False)
+        return _bson_to_dict(bodybytes, SON, False)[0]
             
     def encode(self):
         """

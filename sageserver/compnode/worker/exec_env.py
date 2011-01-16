@@ -10,9 +10,9 @@ from time import time as _time, sleep as _sleep
 
 
 import sageserver.msg as msg
-from preexec import transform_source, transform_ast, assignhook
+from transforms import transform_source, transform_ast, assignhook
 from queuefile import QueueFileOut, QueueFileIn
-from sageloader import SageLoader
+#from sageloader import SageLoader
 
 class ExecEnv(object):
 
@@ -23,10 +23,10 @@ class ExecEnv(object):
         self._send_q = msgr.get_send_queue()
         
         msgr.recv_handlers.update({
-            #msg.STDIN: self._recv_Stdin,
-            #msg.GET_COMPLETIONS: self._recv_GetCompletions,
-            #msg.GET_DOC: self._recv_GetDoc,
-            #msg.GET_SOURCE: self._recv_GetSource,
+            msg.STDIN: self._recv_Stdin,
+            msg.GET_COMPLETIONS: self._recv_GetCompletions,
+            msg.GET_DOC: self._recv_GetDoc,
+            msg.GET_SOURCE: self._recv_GetSource,
         })
 
         self._log = logging.getLogger(
@@ -34,7 +34,7 @@ class ExecEnv(object):
         self._globals = {}
 
         self.MAIN_HANDLERS = {
-            msg.EXEC_CELL: self.exec_,
+            msg.EXEC_CELL: self._main_ExecCell,
             #msg.EXEC_INTERACT: self.exec_,
         }
             
@@ -67,55 +67,61 @@ import sageserver.msg as msg
         self._globals["__displayhook__"] = self._mod_sys.displayhook
         self._globals["__assignhook__"] = assignhook
 
-        self._loader = SageLoader(sys=self._mod_sys, append=True,
-               log=logging.getLogger("SageLoader[pid=%d]" % (os.getpid(),) ) )
-        b = self._globals["__builtins__"]
-        assert "__reload__" not in b
-        b["__reload__"] = b["reload"]
-        b["reload"] = self._loader.reload
+        #self._loader = SageLoader(sys=self._mod_sys, append=True,
+        #       log=logging.getLogger("SageLoader[pid=%d]" % (os.getpid(),) ) )
+        #b = self._globals["__builtins__"]
+        #assert "__reload__" not in b
+        #b["__reload__"] = b["reload"]
+        #b["reload"] = self._loader.reload
 
-    def exec_(self, exec_msg):
+    def _main_ExecCell(self, exec_msg):
         """
         Executes a multi-line block of code.
         """
-        id = exec_msg.id
-        dict = exec_msg.dict
+        sid = exec_msg.hdr.sid
         send_q = self._send_q
         
         self._mod_msg._send_q = send_q
         self._mod_msg._exec_id = id
         
-        self._stdout = QueueFileOut(send_q, msg.Stdout, id)
-        self._stderr = QueueFileOut(send_q, msg.Stderr, id)
+        self._stdout = QueueFileOut(send_q, msg.Stdout, sid)
+        self._stderr = QueueFileOut(send_q, msg.Stderr, sid)
         self._stdin_q = Queue()
-        self._stdin = QueueFileIn(self._stdin_q, send_q, id,
-                                  dict.get('inline_stdin', True))
+        self._stdin = QueueFileIn(self._stdin_q, send_q, sid,
+                                  exec_msg['echo_stdin'])
 
         self._mod_sys.stdout = self._stdout
         self._mod_sys.stderr = self._stderr
         self._mod_sys.stdin = self._stdin
 
-        name = dict.get("name", "__cell_%s__" % (id,))
-        mod = self._loader.new_module(name)
-        self._globals.update(mod.__dict__)
+        #name = exec_msg["name", "__cell_%s__" % (id,))
+        #mod = self._loader.new_module(name)
+        #self._globals.update(mod.__dict__)
+        fname = 'cell_%d.py' % (exec_msg['cid'],)
 
         try:
             # apply source and ast transformations
             source = transform_source(exec_msg, self._globals)
-            self._loader.set_source(name, source)
-            source_ast = ast_parse(source, filename=name, mode='exec')
+            
+            # write to file so that introspection works
+            f = open(fname, 'w')
+            f.write(source)
+            f.close()
+            
+            #self._loader.set_source(name, source)
+            source_ast = ast_parse(source, filename=fname, mode='exec')
             source_ast = transform_ast(exec_msg, source_ast, source,
                                        self._globals)
             # compile and execute
-            code = compile(source_ast, name, 'exec')
-            self._loader.set_code(name, code)
-            dict["transformed_source"] = source
+            code = compile(source_ast, fname, 'exec')
+            #self._loader.set_code(name, code)
+            exec_msg['transformed_source'] = source
             self._globals["__exec_msg__"] = exec_msg
             exec code in self._globals
         except:
             send_q.put(_get_except_msg(exec_msg))
         finally:
-            send_q.put(msg.Done(id=id))
+            send_q.put(msg.Done().as_reply_to(exec_msg))
 
     @property
     def waiting_on_stdin(self):
@@ -138,41 +144,45 @@ import sageserver.msg as msg
         """
         Returns a :class:`msg.Completions` message instance.
         """
-        from json import dumps
-        return msg.Completions(dumps(_complete(m.end_bytes, self._globals)),
-                               id=m.id)
+        return (msg.Completions(m['text'], m['format'],
+                                _complete(m['text'], self._globals))
+                    .as_reply_to(m))
 
     def _recv_GetDoc(self, m):
         """
         Returns a :class:`msg.Doc` or :class:`msg.NotDone` instance.
         """
         from inspect import getdoc
-        objt = _get_obj(m.end_bytes, self._globals)
-        end_bytes = None
+        objt = _get_obj(m['object'], self._globals)
+        doc = None
+        rm = msg.Doc(m['object'], m['format']).as_reply_to(m)
         if objt:
-            end_bytes = getdoc(objt[0])
-        if end_bytes:
-            return msg.Doc(end_bytes, id=m.id)
-        return msg.No(id=m.id)
+            doc = getdoc(objt[0])
+            if m['format'] == 'TEXT':
+                rm['doc'] = doc
+            else:
+                self._log.error("Unknown doc format %r", m['format'])
+        self._msgr.sendmsg(rm)
     
     def _recv_GetSource(self, m):
         """
         Returns a :class:`msg.Source` or :class:`msg.NotDone` instance.
         """
         from inspect import getsource
-        objt = _get_obj(m.end_bytes, self._globals)
+        objt = _get_obj(m['object'], self._globals)
+        rm = (msg.Source(m['object'], m['format'], obj_found=bool(objt))
+                    .as_reply_to(m))
         try:
-            end_bytes = None
             if objt:
-                end_bytes = getsource(objt[0])
-            if end_bytes:
-                return msg.Source(end_bytes, id=m.id)
+                source = getsource(objt[0])
+                if source:
+                    rm['source'] = source
         except IOError:
             pass
         except TypeError: # maybe a builtin?
-            if m.bytes in globals_['__builtins__']:
-                return msg.Source('(builtin object %r)' % m.end_bytes, id=m.id)
-        return msg.No(id=m.id)
+            if m['object'] in self._globals['__builtins__']:
+                rm['source'] = '(builtin object %r)' % (m['object'],)
+        self._msgr.sendmsg(rm)
 
 
 def _fake_sleep(t, sleep_time=0.25):
@@ -229,24 +239,21 @@ def _get_except_msg(exec_msg):
     s = b''.join(['Traceback (most recent call last):\n'] + 
                    traceback.format_list(stack_list) +
                    traceback.format_exception_only(etype, value) )
-    if not exec_msg.dict.get('except_msg', False):
-        return msg.Stderr(s, id=exec_msg.id)
+    if not exec_msg['except_msg']:
+        return msg.Stderr(s, _hsid=exec_msg.hdr.sid)
         
     syntax = None
     try:
         if issubclass(etype, SyntaxError):
-            m, syntax = value.args
+            _, syntax = value.args
         valuestr = str(value)
 
-        return msg.Except(s, dict={
-            'stack': stack_list,
-            'etype': etype.__name__,
-            'value': valuestr,
-            'syntax': syntax
-        }, id=exec_msg.id)
+        return msg.Except(stderr=s, stack=stack_list, etype=etype.__name__,
+                          value=valuestr, syntax=syntax,
+                          _hsid=exec_msg.hdr.sid)
     except:
         pass
-    return msg.Except(s, id=exec_msg.id)
+    return msg.Except(stderr=s, _hsid=exec_msg.hdr.sid)
 
 
 def _complete(text, globals_):

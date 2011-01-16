@@ -1,5 +1,6 @@
 import os
 import select
+import time
 import unittest
 
 from sageserver.compnode.worker import Worker
@@ -27,17 +28,22 @@ class TestWorker(unittest.TestCase):
         while i < len(bytes):
             i += os.write(self._p2c_w, buffer(bytes, i))
             
-    def _get_child_msgs(self, maxbytes=4096, timeout=None):
+    def _get_child_msgs(self, n=1, timeout=None):
         """
         Returns a list of child messages.
         """
         decoder = MsgDecoder()
         msgs = []
-        rlist, _, _ = select.select([self._c2p_r], [], [], timeout)
-        #print "rlist: %r" % (rlist,)
-        for fd in rlist:
-            rbytes = os.read(fd, maxbytes)
-            msgs.extend(decoder.feed(rbytes))
+        if timeout is None:
+            endt = time.time() - 1.0
+        else:
+            endt = time.time() + timeout
+        while time.time() < endt and len(msgs) < n:
+            rlist, _, _ = select.select([self._c2p_r], [], [], timeout)
+            #print "rlist: %r" % (rlist,)
+            for fd in rlist:
+                rbytes = os.read(fd, 4096)
+                msgs.extend(decoder.feed(rbytes))
         return msgs
         
 
@@ -52,6 +58,11 @@ class TestWorker(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0].type, msg.NO)
         
+    def test_exec_hello_world(self):
+        self._send_msg(msg.ExecCell('print "Hello World!"'))
+        msgs = self._get_child_msgs(2, timeout=0.25)
+        self.assertEqual([m.type for m in msgs],
+                         [msg.STDOUT, msg.STDOUT, msg.DONE])
         
     
     def tearDown(self):

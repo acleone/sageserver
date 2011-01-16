@@ -25,6 +25,11 @@ class JoinBuffer(object):
         self._bufs.append(bytes)
         self._buflen += len(bytes)
         
+    def popall(self, join=True):
+        r = b''.join(map(bytes, self._bufs)) if join else None
+        self.clear()
+        return r
+        
     def popleft(self, n, join=True):
         """
         Pop the first n octets off and return a contiguous bytes(...) object.
@@ -35,9 +40,7 @@ class JoinBuffer(object):
         if self._buflen < n:
             return None
         if self._buflen == n:
-            r = b''.join(map(bytes, self._bufs)) if join else None
-            self.clear()
-            return r
+            return self.popall(join)
         # else buflen > n
         ilen = 0
         joins = []

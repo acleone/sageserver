@@ -6,7 +6,7 @@
 
 from bson import SON, _dict_to_bson
 
-from hdr import Hdr
+from hdr import Hdr, HDRF_SCLOSE
 
 class No(SON):
     """
@@ -14,12 +14,17 @@ class No(SON):
     """
     type = 100
     
-    def __init__(self):
+    def __init__(self, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(100, 0, 0, 0)
+        self.hdr = Hdr(100, _hsid, 0, _hflags)
         self.type = 100
         self['t'] = 100
         
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -36,12 +41,17 @@ class Yes(SON):
     """
     type = 101
     
-    def __init__(self):
+    def __init__(self, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(101, 0, 0, 0)
+        self.hdr = Hdr(101, _hsid, 0, _hflags)
         self.type = 101
         self['t'] = 101
         
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -61,12 +71,17 @@ class Interrupt(SON):
     """
     type = 110
     
-    def __init__(self, timeout=1.0):
+    def __init__(self, timeout=1.0, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(110, 0, 0, 0)
+        self.hdr = Hdr(110, _hsid, 0, _hflags)
         self.type = 110
         self['t'] = 110
         self['timeout'] = timeout
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -83,12 +98,17 @@ class Shutdown(SON):
     """
     type = 111
     
-    def __init__(self):
+    def __init__(self, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(111, 0, 0, 0)
+        self.hdr = Hdr(111, _hsid, 0, _hflags)
         self.type = 111
         self['t'] = 111
         
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -105,15 +125,37 @@ class ExecCell(SON):
     
     Message Arguments:
         source -- Source code of the cell to execute
+        cid -- Cell id (default: 0)
+        echo_stdin -- Output Stdin messages when Stdin is returned to the executing code (default: True)
+        displayhook -- 
+            'LAST': only the last expression.
+            'ALL': All expressions
+            'NONE': nothing. (default: LAST)
+        assignhook -- 
+            'ALL': print results of all assignments.
+            'NONE': nothing. (default: NONE)
+        print_ast -- If True, print the abstract syntax tree before executing. (default: False)
+        except_msg -- If True, send an Except message when an exception occurs.  If False, print to stderr. (default: False)
     """
     type = 120
     
-    def __init__(self, source):
+    def __init__(self, source, cid=0, echo_stdin=True, displayhook='LAST', assignhook='NONE', print_ast=False, except_msg=False, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(120, 0, 0, 0)
+        self.hdr = Hdr(120, _hsid, 0, _hflags)
         self.type = 120
         self['t'] = 120
         self['source'] = source
+        self['cid'] = cid
+        self['echo_stdin'] = echo_stdin
+        self['displayhook'] = displayhook
+        self['assignhook'] = assignhook
+        self['print_ast'] = print_ast
+        self['except_msg'] = except_msg
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -130,12 +172,219 @@ class IsComputing(SON):
     """
     type = 130
     
-    def __init__(self):
+    def __init__(self, _hsid=0, _hflags=0):
         SON.__init__(self)
-        self.hdr = Hdr(130, 0, 0, 0)
+        self.hdr = Hdr(130, _hsid, 0, _hflags)
         self.type = 130
         self['t'] = 130
         
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class GetCompletions(SON):
+    """
+    GetCompletions Message
+    
+    Message Arguments:
+        text -- the text to complete
+        format -- None (default: TEXT)
+    """
+    type = 140
+    
+    def __init__(self, text, format='TEXT', _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(140, _hsid, 0, _hflags)
+        self.type = 140
+        self['t'] = 140
+        self['text'] = text
+        self['format'] = format
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Completions(SON):
+    """
+    Completions Message
+    
+    Message Arguments:
+        text -- None
+        format -- None
+        completions -- None
+    """
+    type = 141
+    
+    def __init__(self, text, format, completions, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(141, _hsid, 0, _hflags)
+        self.type = 141
+        self['t'] = 141
+        self['text'] = text
+        self['format'] = format
+        self['completions'] = completions
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class GetDoc(SON):
+    """
+    GetDoc Message
+    
+    Message Arguments:
+        object -- None
+        format -- None (default: TEXT)
+    """
+    type = 142
+    
+    def __init__(self, object, format='TEXT', _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(142, _hsid, 0, _hflags)
+        self.type = 142
+        self['t'] = 142
+        self['object'] = object
+        self['format'] = format
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Doc(SON):
+    """
+    Doc Message
+    
+    Message Arguments:
+        object -- None
+        format -- None
+        obj_found -- None (default: False)
+        doc -- None (default: None)
+    """
+    type = 143
+    
+    def __init__(self, object, format, obj_found=False, doc=None, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(143, _hsid, 0, _hflags)
+        self.type = 143
+        self['t'] = 143
+        self['object'] = object
+        self['format'] = format
+        self['obj_found'] = obj_found
+        self['doc'] = doc
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class GetSource(SON):
+    """
+    GetSource Message
+    
+    Message Arguments:
+        object -- None
+        format -- None (default: TEXT)
+    """
+    type = 144
+    
+    def __init__(self, object, format='TEXT', _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(144, _hsid, 0, _hflags)
+        self.type = 144
+        self['t'] = 144
+        self['object'] = object
+        self['format'] = format
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
+
+class Source(SON):
+    """
+    Source Message
+    
+    Message Arguments:
+        object -- None
+        format -- None
+        obj_found -- None (default: False)
+        source -- None (default: None)
+    """
+    type = 145
+    
+    def __init__(self, object, format, obj_found=False, source=None, _hsid=0, _hflags=0):
+        SON.__init__(self)
+        self.hdr = Hdr(145, _hsid, 0, _hflags)
+        self.type = 145
+        self['t'] = 145
+        self['object'] = object
+        self['format'] = format
+        self['obj_found'] = obj_found
+        self['source'] = source
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """

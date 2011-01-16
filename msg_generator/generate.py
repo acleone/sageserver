@@ -49,7 +49,8 @@ class MsgClass(object):
         args = (['self'] +
                 [fld.name for fld in self.flds if fld.required] +
                 ["%s=%r" % (fld.name, fld.default) for fld in self.flds
-                    if not fld.required])
+                    if not fld.required] +
+                ['_hsid=0', '_hflags=0'])
         argsstr = ', '.join(args)
         
         body_inserts = []
@@ -65,10 +66,15 @@ class MsgClass(object):
     
     def __init__({argsstr}):
         SON.__init__(self)
-        self.hdr = Hdr({self.typeval!r}, 0, 0, 0)
+        self.hdr = Hdr({self.typeval!r}, _hsid, 0, _hflags)
         self.type = {self.typeval!r}
         self['t'] = {self.typeval!r}
         {body_inserts}
+        
+    def as_reply_to(self, m):
+        self.hdr.sid = m.hdr.sid
+        self.hdr.flags |= HDRF_SCLOSE
+        return self
         
     def encode(self):
         """
@@ -112,7 +118,7 @@ def generate_cls_file(path, msgclasses):
 
 from bson import SON, _dict_to_bson
 
-from hdr import Hdr
+from hdr import Hdr, HDRF_SCLOSE
 
 {cls_strs}
 """.format(**locals())

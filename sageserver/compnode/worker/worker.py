@@ -54,6 +54,7 @@ class Worker(object):
         msgr.recv_handlers.update({
             msg.SHUTDOWN: self._recv_Shutdown,
             msg.IS_COMPUTING: self._recv_IsComputing,
+            msg.EXEC_CELL: self._recv_pass_to_main,
         })
         msgr.set_shutdown_test(self.is_shutdown)
         msgr.set_on_shutdown(self.shutdown)
@@ -90,6 +91,9 @@ class Worker(object):
     def _recv_IsComputing(self, m):
         rm = msg.No() if self._main_receiving else msg.Yes()
         self._send_q.put(rm)
+        
+    def _recv_pass_to_main(self, m):
+        self._main_q.put(m)
    
     def shutdown(self):
         if self._shutdown_called:

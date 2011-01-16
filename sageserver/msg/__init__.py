@@ -34,6 +34,7 @@ In python struct format syntax, the header is represented as "<HHIBB".
 """
 
 from msgtypes import *
+from hdr import *
 
 from output_msgs import *
 from request_msgs import *
