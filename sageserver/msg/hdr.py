@@ -1,13 +1,12 @@
 from struct import calcsize, pack_into, unpack_from
 
 __all__ = ("HDR_LEN", "HDRF_SOPEN", "HDRF_SCLOSE",
-           "Hdr", "IncHdrDecoder")
+           "Hdr", "HdrDecodeError")
 
 _HDR_STRUCT_FMT = "<HHIBH"
 
 HDR_LEN = calcsize(_HDR_STRUCT_FMT)
 
-_HDR_SUM_IDX = HDR_LEN - 1
 _N_CSUM_BYTES = 8
 _CSUM_MASK = 0xffff
 
@@ -54,7 +53,11 @@ class Hdr(object):
                   self.type, self.sid,
                   self.length,
                   self.flags, 0)
-        bytes[_HDR_SUM_IDX] = (sum(bytes[:_N_CSUM_BYTES]) & _CSUM_MASK) ^ _CSUM_MASK
+        csum = (sum(bytes[:_N_CSUM_BYTES]) & _CSUM_MASK) ^ _CSUM_MASK
+        pack_into(_HDR_STRUCT_FMT, bytes, 0,
+                  self.type, self.sid,
+                  self.length,
+                  self.flags, csum)
         return bytes
         
     @classmethod
@@ -79,52 +82,3 @@ class HdrDecodeError(Exception):
     """
     Error thrown when decoding fails.
     """
-
-class IncHdrDecoder(object):
-    """
-    Incremental decoder for header objects.
-    
-    TESTS::
-    
-       >>> d = IncHdrDecoder()
-       >>> h1str = Hdr(3, 4, 5, 6).encode()
-       >>> d.feed(h1str[0:-1])
-       (9, None)
-       >>> d.feed(h1str[-1:])
-       (1, Hdr(type=3, sid=4, length=5, flags=6))
-       >>> d.feed(Hdr(0xffff, 0xffff, 0xffffffff, 0xff).encode())
-       (10, Hdr(type=65535, sid=65535, length=4294967295, flags=255))
-       >>> d.feed(Hdr(2011, 0, 203453, 7).encode())
-       (10, Hdr(type=2011, sid=0, length=203453, flags=7))
-       >>> d.feed(b"hi!" + Hdr(3, 4, 5, 6).encode(), offset=3)
-       (13, Hdr(type=3, sid=4, length=5, flags=6))
-    """
-    
-    __slots__ = ("_buf", "_n_needed")
-    
-    def __init__(self):
-        self.reset()
-        
-    def reset(self):
-        """
-        Resets the parser.
-        """
-        self._buf = bytearray()
-        self._n_needed = HDR_LEN
-        
-    def feed(self, bytearr, offset=0):
-        """
-        Returns (int newoffset, Hdr headerobj).  headerobj is None if there 
-        are more bytes.
-        """
-        add = buffer(bytearr, offset, self._n_needed)
-        self._buf.extend(add)
-        self._n_needed -= len(add)
-        
-        if self._n_needed:
-            return (None, offset + len(add))
-        
-        # got the whole header
-        buf = self._buf
-        self.reset()
-        return (Hdr.decode(buf), offset + len(add))

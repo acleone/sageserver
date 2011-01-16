@@ -1,21 +1,16 @@
 import logging
 import os
 from Queue import Queue
-from socket import create_connection
 import thread
 from time import sleep as _sleep, time as _time
 from traceback import format_exc
 
 from exec_env import ExecEnv
+from msgr import ShutdownNow
 import sageserver.msg as msg
-from sageserver.util import JoinBuffer
+from sageserver.msg.decodedmsg import CallbackMsgDecoder
 
 logging.basicConfig(level=logging.DEBUG)
-
-
-RMSG_PIPE = 3
-WMSG_PIPE = 4    
-            
 
 class Worker(object):
     """    
@@ -38,16 +33,14 @@ class Worker(object):
     communication threads is possible.
     
     Communication between threads is done with Queue's.
-    
     """
-    def __init__(self):
+    def __init__(self, msgr):
         self._log = logging.getLogger(
             "%s[pid=%s]" % (self.__class__.__name__, os.getpid()) )
-        
-        self.RECV_HANDLERS = set((msg.SHUTDOWN, msg.INTERRUPT,
-                                  msg.IS_COMPUTING))
+        self._msgr = msgr        
             
-    def loop(self):
+    def loop_forever(self):
+        msgr = self._msgr
         self._shutdown = False
         self._shutdown_called = False
         
@@ -55,38 +48,31 @@ class Worker(object):
         self._main_receiving = False # the main thread is blocking on a get()
 
         self._main_q = Queue()
-        self._send_q = Queue()
-
-        self._exec_env = ExecEnv(self._send_q)
+        self._send_q = msgr.get_send_queue()
         
-        thread.start_new_thread(self._recv_thread, ())
-        thread.start_new_thread(self._send_thread, ())
+        self._exec_env = ExecEnv(msgr)
+        msgr.recv_handlers.update({
+            msg.SHUTDOWN: self._recv_Shutdown,
+            msg.IS_COMPUTING: self._recv_IsComputing,
+        })
+        msgr.set_shutdown_test(self.is_shutdown)
+        msgr.set_on_shutdown(self.shutdown)
+                
+        msgr.start_io()
         
-        self._main_thread()
-        
-            
-    def _main_thread(self):
-        """
-        Executes messages from sent from the recv thread over self._main_q.
-        """
         try:  
             while not self._shutdown:
                 self._main_receiving = True
-                try:
-                    m = self._main_q.get()
-                except KeyboardInterrupt:
-                    continue
+                m = self._main_q.get()
                 self._main_receiving = False
                 self._log.debug("[_main_thread] Got %r", m)
                 if m.type == msg.SHUTDOWN:
                     self._shutdown = m
                     break
-                if m.type == msg.INTERRUPT:
-                    continue
-                try:
-                    self._exec_env.MAIN_HANDLERS[mtype](o)
-                except KeyError:
-                    self._log.error("[_main_thread] unhandled message %s", o)
+                if m.type in self._exec_env.MAIN_HANDLERS:
+                    self._exec_env.MAIN_HANDLERS[m.type](m)
+                else:
+                    self._log.error("[_main_thread] unhandled message %s", m)
         except KeyboardInterrupt:
             pass
         except:
@@ -94,112 +80,27 @@ class Worker(object):
         finally:
             self._main_dead = True
             self._main_receiving = False
-            self._log.info("[_main_thread] Exiting.")
+            self._log.debug("[_main_thread] Exiting.")
             self.shutdown()
-            
-    def _recv_thread(self):
-        """
-        Receives bson messages over RMSG_PIPE.
-        """
-        try:
-            rdr = BlockingPipeReader(RMSG_PIPE, self.is_shutdown)
-            while not self._shutdown:
-                hdr = msg.Hdr.decode(rdr.read(msg.HDR_LEN))
-                if self._on_recv_hdr(hdr):
-                    self._log.debug("Reading Message %d", hdr.type)
-                    bodybytes = rdr.read(hdr.length)
-                    m = msg.TYPE_DICT[hdr.type](hdr, bodybytes)
-                    self._on_recv_msg(m)
-                else:
-                    self._log.debug("Skipping Message %d", hdr.type)
-                    rdr.skip(hdr.length)
-        except EOFError:
-            self._log.info("[_recv_thread] Got EOF.")
-        except:
-            self._log.error("[_recv_thread] %s", format_exc())
-        finally:
-            self._log.debug("[_recv_thread] Exiting.")
-            self.shutdown()
-            
-    def _on_recv_hdr(self, hdr):
-        return hdr.type in msg.TYPE_DICT
+
+    def _recv_Shutdown(self, m):
+        self._shutdown = m
+        raise ShutdownNow()
     
-    def _on_recv_msg(self, m):
-        sendm = None
-        if m.type in self.RECV_HANDLERS:
-            if m.type == msg.SHUTDOWN:
-                self._shutdown = m
-                raise EOFError()
-            elif m.type == msg.INTERRUPT:
-                for _ in range(m['retries']):
-                    if self._interrupt_main(m['poll_for']):
-                        sendm = msg.Yes().init()
-                        break
-                else:
-                    sendm = msg.No().init()
-            elif m.type == msg.IS_COMPUTING:
-                sendm = (msg.No().init() if self._main_receiving
-                         else msg.Yes().init())
-        elif m.type in self._exec_env.MAIN_HANDLERS:
-            # send the message to the main thread
-            self._main_q.put(m)
-        else:
-            try:
-                sendm = self._exec_env.RECV_HANDLERS[m.type](m)
-            except KeyError:
-                self._log.warning("Unhandled msg: %r", m)
-        if sendm is not None:
-            sendm.hdr.sid = m.hdr.sid
-            sendm.hdr.flags |= msg.HDRF_SCLOSE
-            self._send_q.put(sendm)        
-                    
-    def _send_thread(self):
-        """
-        Sends messages.
-        """
-        try:
-            while not self._shutdown:
-                m = self._send_q.get()
-                if self._send_q.empty() or m.type == msg.SHUTDOWN:
-                    self._log.debug("[_send_thread] Got single %r", m)
-                    self._blocking_write(m.encode())
-                    if m.type == msg.SHUTDOWN:
-                        break
-                    continue
-                msgs = [m]
-                while not self._send_q.empty():
-                    m = self._send_q.get()
-                    msgs.append(m)
-                    if m.type == msg.SHUTDOWN:
-                        break
-                
-                self._log.debug("[_send_thread] Got multiple %r", msgs)
-                #sendall(msg.combine_and_encode(msgs))
-                self._blocking_write(b''.join([m.encode() for m in msgs]))
-                if msgs[-1].type == msg.SHUTDOWN:
-                    break
-        except EOFError:
-            self._log.debug("[_send_thread] Got EOF.")
-        except:
-            self._log.error("[_send_thread] %s", format_exc())
-        finally:
-            self._log.debug("[_send_thread] Exiting.")
-            self.shutdown()
-            
-    def _blocking_write(self, bytes):
-        i = 0
-        while not self._shutdown and i < len(bytes):
-            i += os.write(WMSG_PIPE, buffer(bytes, i))
-        
+    def _recv_IsComputing(self, m):
+        rm = msg.No() if self._main_receiving else msg.Yes()
+        self._send_q.put(rm)
+   
     def shutdown(self):
         if self._shutdown_called:
             return
         self._shutdown_called = True
         if not self._shutdown:
-            self._shutdown = msg.Shutdown().init()
+            self._shutdown = msg.Shutdown()
         sd = self._shutdown
         self._send_q.put(sd)
         self._main_q.put(sd)
+        return
         
         if _poll_for(self, '_main_dead', timeout=sd['before_int']):
             return
@@ -233,73 +134,7 @@ class Worker(object):
         return False
         
     def is_shutdown(self):
-        return self._shutdown
-    
-    
-class BlockingPipeReader(object):
-    
-    def __init__(self, fd, is_shutdown_func):
-        self._fd = fd
-        self._is_shutdown_func = is_shutdown_func
-        self._jbuf = JoinBuffer()
-        
-    def read(self, n):
-        """
-        Returns a bytes instance with n octets.
-        Throws EOFError if EOF is seen or is_shutdown_func returns True.
-        """
-        while len(self._jbuf) < n:
-            if self._is_shutdown_func():
-                raise EOFError()
-            rbytes = os.read(self._fd, 4096)
-            if not rbytes: # EOF
-                raise EOFError()
-            self._jbuf.append(rbytes)
-        return self._jbuf.popleft(n)
-    
-    def skip(self, n):
-        """
-        Skips n octets of output.
-        Throws EOFError if EOF is seen or is_shutdown_func returns True.
-        """
-        if n == 0:
-            return
-        if len(self._jbuf) > n:
-            self._jbuf.popleft(n, join=False)
-            return
-        if len(self._jbuf) == n:
-            self._jbuf.clear()
-            return
-        
-        n_seen = len(self._jbuf)
-        self._jbuf.clear()
-        rbytes = None
-        while n_seen < n:
-            if self._is_shutdown_func():
-                raise EOFError()
-            rbytes = os.read(self._fd, 4096)
-            if not rbytes: # EOF
-                raise EOFError()
-            n_seen += len(rbytes)
-        if n_seen > n: # save some bytes.
-            extra = n_seen - n
-            split_idx = len(rbytes) - extra
-            self._jbuf.append(buffer(rbytes, split_idx))
-        return
-        
-        
-def _poll_for(obj, attr, timeout=1.0, done_when=True, sleeptime=0.1):
-    """
-    Polls ``bool(getattr(obj, attr))`` occasinally until it returns
-    `done_when`.  Returns the boolean value of the attribute.
-    """
-    def bool_val():
-        a = getattr(obj, attr)
-        return bool(a) if not hasattr(a, '__call__') else bool(a())
-    endt = _time() + timeout
-    while bool_val() != done_when and _time() < endt:
-        _sleep(sleeptime)
-    return bool_val()
+        return bool(self._shutdown)
     
 if __name__ == '__main__':
     import doctest

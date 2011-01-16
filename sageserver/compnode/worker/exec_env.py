@@ -16,25 +16,26 @@ from sageloader import SageLoader
 
 class ExecEnv(object):
 
-    def __init__(self, send_q):
+    def __init__(self, msgr):
         """
         Sets up this execution session's environment.
         """
-        self._send_q = send_q
+        self._send_q = msgr.get_send_queue()
+        
+        msgr.recv_handlers.update({
+            #msg.STDIN: self._recv_Stdin,
+            #msg.GET_COMPLETIONS: self._recv_GetCompletions,
+            #msg.GET_DOC: self._recv_GetDoc,
+            #msg.GET_SOURCE: self._recv_GetSource,
+        })
 
         self._log = logging.getLogger(
             "%s[pid=%s]" % (self.__class__.__name__, os.getpid()) )
         self._globals = {}
-        
-        self.RECV_HANDLERS = {
-            msg.STDIN: self.recv_Stdin,
-            msg.GET_COMPLETIONS: self.recv_GetCompletions,
-            msg.GET_DOC: self.recv_GetDoc,
-            msg.GET_SOURCE: self.recv_GetSource,
-        }
+
         self.MAIN_HANDLERS = {
             msg.EXEC_CELL: self.exec_,
-            msg.EXEC_INTERACT: self.exec_,
+            #msg.EXEC_INTERACT: self.exec_,
         }
             
         
@@ -126,14 +127,14 @@ import sageserver.msg as msg
         return False
     
 
-    def recv_Stdin(self, m):
+    def _recv_Stdin(self, m):
         if hasattr(self, '_stdin_q'):
             self._stdin_q.put(m)
         else:
             self._log.warning("[recv_Stdin] unhandled Stdin (%r)!", m)
         return None
 
-    def recv_GetCompletions(self, m):
+    def _recv_GetCompletions(self, m):
         """
         Returns a :class:`msg.Completions` message instance.
         """
@@ -141,7 +142,7 @@ import sageserver.msg as msg
         return msg.Completions(dumps(_complete(m.end_bytes, self._globals)),
                                id=m.id)
 
-    def recv_GetDoc(self, m):
+    def _recv_GetDoc(self, m):
         """
         Returns a :class:`msg.Doc` or :class:`msg.NotDone` instance.
         """
@@ -154,7 +155,7 @@ import sageserver.msg as msg
             return msg.Doc(end_bytes, id=m.id)
         return msg.No(id=m.id)
     
-    def recv_GetSource(self, m):
+    def _recv_GetSource(self, m):
         """
         Returns a :class:`msg.Source` or :class:`msg.NotDone` instance.
         """

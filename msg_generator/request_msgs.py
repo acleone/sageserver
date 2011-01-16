@@ -17,6 +17,8 @@ msgs = [
     MsgClass('ExecCell', 'EXEC_CELL', 120, [
         Fld('source', doc='Source code of the cell to execute'),
     ]),
+    
+    MsgClass('IsComputing', 'IS_COMPUTING', 130, doc="Returns Yes or No"),
 
 
 ]

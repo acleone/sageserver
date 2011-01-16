@@ -1,13 +1,7 @@
-from twisted.internet import protocol
+from twisted.internet.protocol import ProcessProtocol, Factory
 from twisted.internet import reactor
-from twisted.python import log
-
-from bson.errors import BSONError
-from collections import deque
-from sys import argv as sys_argv
 
 import sageserver.msg as msg
-from sageserver.util import JoinBuffer
 
 def get_worker_path(rel_path):
     from sys import argv
@@ -21,11 +15,7 @@ def main():
     WorkerProcessProtocol.spawn_worker()
     reactor.run()
 
-WP_READING_HEADER = 1
-WP_READING_BODY = 2
-WP_SKIPPING_BODY = 3
-
-class WorkerProcessProtocol(protocol.ProcessProtocol):    
+class WorkerProcessProtocol(ProcessProtocol):
     @classmethod
     def spawn_worker(cls):
         wpp = cls()
@@ -39,13 +29,6 @@ class WorkerProcessProtocol(protocol.ProcessProtocol):
     
     def __init__(self):
         print ">>>>> __init__ <<<<<"
-        self._jbuf = JoinBuffer()
-        self._hdr = None
-        self._reset_msg_parser()
-        
-    def _reset_msg_parser(self):
-        self._state = WP_READING_HEADER
-        self._n_needed = msg.HDR_LEN
         
     def connectionMade(self):
         print ">>>>> connectionMade <<<<<"

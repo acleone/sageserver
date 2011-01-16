@@ -64,10 +64,9 @@ class MsgDecoder(object):
         self._jbuf = JoinBuffer()
         self._hdr = None
         
-    def feed(self, bytes, cbk_func=None):
+    def feed(self, bytes):
         """
-        Returns a list of DecodedMsg instances.  If cbk_func is not None,
-        calls cbk_func(msg) for each decoded message.
+        Returns a list of DecodedMsg instances.
         """
         jbuf = self._jbuf
         jbuf.extend(bytes)
@@ -83,9 +82,38 @@ class MsgDecoder(object):
                     break
                 bodybytes = jbuf.popleft(self._hdr.length)
                 m = DecodedMsg(self._hdr, bodybytes)
-                if cbk_func is not None:
-                    cbk_func(m)
                 msgs.append(m)
                 self._hdr = None
                 
         return msgs
+    
+class CallbackMsgDecoder(object):
+    
+    def __init__(self, callbacks, log=None):
+        self._callbacks = callbacks
+        self._log = log
+        self._jbuf = JoinBuffer()
+        self._hdr = None
+        
+    def feed(self, bytes):
+        callbacks = self._callbacks
+        jbuf = self._jbuf
+        jbuf.extend(bytes)
+        while True:
+            if self._hdr is None:
+                if len(jbuf) < HDR_LEN:
+                    break
+                hdrbytes = jbuf.popleft(HDR_LEN)
+                self._hdr = Hdr.decode(hdrbytes)
+            else:
+                if len(jbuf) < self._hdr.length:
+                    break
+                if self._hdr.type in callbacks:
+                    bodybytes = jbuf.popleft(self._hdr.length)
+                    m = DecodedMsg(self._hdr, bodybytes)
+                    callbacks[self._hdr.type](m)
+                elif self._log is not None:
+                    jbuf.popleft(self._hdr.length, False)
+                    self._log.warning("Unhandled message type=%d",
+                                      self._hdr.type)
+                self._hdr = None

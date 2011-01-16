@@ -123,3 +123,25 @@ class ExecCell(SON):
         self.hdr.length = len(bodybytes)
         return self.hdr.encode() + bodybytes
         
+
+class IsComputing(SON):
+    """
+    Returns Yes or No
+    """
+    type = 130
+    
+    def __init__(self):
+        SON.__init__(self)
+        self.hdr = Hdr(130, 0, 0, 0)
+        self.type = 130
+        self['t'] = 130
+        
+        
+    def encode(self):
+        """
+        Returns the encoded representation of this message.
+        """
+        bodybytes = _dict_to_bson(self, False)
+        self.hdr.length = len(bodybytes)
+        return self.hdr.encode() + bodybytes
+        
