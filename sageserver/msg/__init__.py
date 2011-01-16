@@ -33,10 +33,12 @@ In python struct format syntax, the header is represented as "<HHIBB".
 
 """
 
-from msgints import *
-from hdr import *
-from msgbase import *
+from msgtypes import *
 
+from output_msgs import *
+from request_msgs import *
+
+'''
 def _gen_type_strs():
     import msgints
     return dict([(getattr(msgints, k), k)
@@ -63,6 +65,4 @@ def _gen_type_dict():
     return type_dict
 
 TYPE_DICT = _gen_type_dict()
-    
-from msgs_outputs import *
-from msgs_requests import *
+'''

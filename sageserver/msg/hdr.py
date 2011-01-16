@@ -3,12 +3,13 @@ from struct import calcsize, pack_into, unpack_from
 __all__ = ("HDR_LEN", "HDRF_SOPEN", "HDRF_SCLOSE",
            "Hdr", "IncHdrDecoder")
 
-_HDR_STRUCT_FMT = "<HHIBB"
+_HDR_STRUCT_FMT = "<HHIBH"
 
 HDR_LEN = calcsize(_HDR_STRUCT_FMT)
 
 _HDR_SUM_IDX = HDR_LEN - 1
 _N_CSUM_BYTES = 8
+_CSUM_MASK = 0xffff
 
 HDRF_SOPEN = 0x80
 HDRF_SCLOSE = 0x40
@@ -53,7 +54,7 @@ class Hdr(object):
                   self.type, self.sid,
                   self.length,
                   self.flags, 0)
-        bytes[_HDR_SUM_IDX] = (sum(bytes[:_N_CSUM_BYTES]) & 0xff) ^ 0xff
+        bytes[_HDR_SUM_IDX] = (sum(bytes[:_N_CSUM_BYTES]) & _CSUM_MASK) ^ _CSUM_MASK
         return bytes
         
     @classmethod
@@ -62,7 +63,7 @@ class Hdr(object):
         # calculate expected checksum
         esum = (sum(
                     bytearray(buffer(bytearr, offset, _N_CSUM_BYTES))
-                ) & 0xff) ^ 0xff
+                ) & _CSUM_MASK) ^ _CSUM_MASK
         if esum != csum:
             raise HdrDecodeError("header sum incorrect (got 0x%02x exp 0x%02x)"
                                  % (csum, esum))

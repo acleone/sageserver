@@ -1,4 +1,3 @@
-doc/_*
 *.pyc
-.project
-.pydevproject
+doc/_*
+sageserver.egg-info/*

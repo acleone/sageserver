@@ -21,7 +21,7 @@ class JoinBuffer(object):
         self._bufs.clear()
         self._buflen = 0
         
-    def append(self, bytes):
+    def extend(self, bytes):
         self._bufs.append(bytes)
         self._buflen += len(bytes)
         
